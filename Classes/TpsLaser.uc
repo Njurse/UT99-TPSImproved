@@ -13,6 +13,6 @@ defaultproperties
      Texture=Texture'Tps.TpsLaser'
      Skin=Texture'Tps.TpsLaser'
      Mesh=LodMesh'Botpack.PBolt'
-     DrawScale=0.500000
+     DrawScale=1.0
      bUnlit=True
 }

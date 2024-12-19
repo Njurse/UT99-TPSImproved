@@ -51,10 +51,15 @@ simulated function rotator GetShakeRotation(float ElapsedTime, float Intensity, 
 simulated function tick(float Deltatime)
 {
 	Local Actor A,B;
-	Local Vector X,Y,Z,HL,HN,RL,YOffset;
+	Local Vector X,Y,Z,TraceHitLocation,TraceHitNormal,RL,YOffset;
 	Local PlayerPawn Pp;
 	Local Int I,TCamX,TCamZ;
 	Local Float Scale1,Scale2;
+
+	local rotator TestRotation;
+
+	TestRotation.Yaw = 50;
+
 	
 	if ( Owner == none || Owner.Physics == PHYS_None || Pawn(Owner).Health <= 0 )
 	{
@@ -73,7 +78,8 @@ simulated function tick(float Deltatime)
 			Break;
 	}
 	Pp = PlayerPawn(Owner);
-	YOffset = vect(0,-23,0) >> Pp.ViewRotation;
+	
+	YOffset = vect(0,30,0) >> Pp.ViewRotation;
 	if ( Role < ROLE_Authority || Level.NetMode == NM_Standalone)
 	{
 		if ( Pp.MyHUD.IsA('ChallengeHUD') )
@@ -86,7 +92,7 @@ simulated function tick(float Deltatime)
 	
 	if ( Level.NetMode != NM_Standalone && Crosshair == None )
 		Crosshair = texture'Botpack.Icons.Chair1';
-	if ( Pp.Weapon != None && Pp.Weapon.IsA('SniperRifle')
+	if ( Pp.Weapon != None && (Pp.Weapon.IsA('SniperRifle') || Pp.Weapon.IsA('IRPR'))
 	&& Pp.Weapon.bOwnsCrossHair )
 	{
 		Pp.ViewTarget = None;
@@ -110,7 +116,7 @@ simulated function tick(float Deltatime)
 	
 	CCamX = CamX;
 	CCamZ = CamZ;
-	A = Trace(RL,HN,Pp.Location+CamZ*Z,Pp.Location,false);
+	A = Trace(RL,TraceHitNormal,Pp.Location+CamZ*Z,Pp.Location,false);
 	if ( A == None )
 		RL = Pp.Location+CamZ*Z + YOffset;
 	else
@@ -121,13 +127,13 @@ simulated function tick(float Deltatime)
 		if ( TCamX < DCamX )
 			DCamX = TCamX;
 	}
-	B = Trace(HL,HN,RL-CCamX*X,RL,false);
+	B = Trace(TraceHitLocation,TraceHitNormal,RL-CCamX*X,RL,false);
 	if ( B == None )
-		HL = RL-CCamX*X;
+		TraceHitLocation = RL-CCamX*X;
 	else
 	{
-		HL += 5*X;
-		Scale2 = vsize(HL-RL)/float(CamX);
+		TraceHitLocation += 5*X;
+		Scale2 = vsize(TraceHitLocation-RL)/float(CamX);
 		TCamZ = Scale2*CamZ;
 		if ( TCamZ < DCamZ )
 			DCamZ = TCamZ;
@@ -142,14 +148,11 @@ simulated function tick(float Deltatime)
 
 		if ( Role < ROLE_Authority || Level.NetMode == NM_Standalone )
 		{
-			Pp.ClientMessage(string(Role));
-			Pp.ClientMessage(string(Role<ROLE_Authority));
-			Pp.ClientMessage(string(HL));
 			SetRotation(Pp.ViewRotation);
 
 	
-
-    		SetLocation(LerpVector(Location,HL + YOffset,0.33)); // Apply the offset here for final positioning
+			
+    		SetLocation(LerpVector(Location,TraceHitLocation + YOffset,0.37)); // Apply the offset here for final positioning
 
 			if ( cHUD != None )
 				cHUD.Crosshair = 999;
@@ -161,7 +164,7 @@ simulated function tick(float Deltatime)
 
 simulated function LaserSight()
 {
-	Local Vector X2,Y2,Z2,X,Y,Z,HL,HN,ET1,ET2,ST,LL,WL;
+	Local Vector X2,Y2,Z2,X,Y,Z,TraceHitLocation,TraceHitNormal,TraceEndLocation,ET2,TraceStart,LL,PlayerLoc;
 	local actor A,B;
 	Local PlayerPawn Pp;
 	local float dist1,dist2,dist3,scale;
@@ -170,28 +173,29 @@ simulated function LaserSight()
 	Pp = PlayerPawn(Owner);
 	GetAxes(Pp.ViewRotation,X,Y,Z);
 	if ( Pp.Weapon == None || Pp.Weapon.IsA('SniperRifle') )
-		ST = Pp.Location + Pp.Eyeheight * Z;
+		TraceStart = Pp.Location + Pp.Eyeheight * Z;
 	else
 	{
 		if ( Role == Role_Authority )
 			CDO = Pp.Weapon.CalcDrawOffset()
 			+ Pp.Weapon.FireOffset.Y * Y + Pp.Weapon.FireOffset.Z * Z;
-		ST = Pp.Location + CDO;
+		TraceStart = Pp.Location + CDO + vect(0,0,20);
 	}
-	ET1 = ST + 100000 * X;
-	A = Trace(HL,HN,ET1,ST,False);
+	TraceEndLocation = TraceStart + 100000 * X;
+	A = Trace(TraceHitLocation,TraceHitNormal,TraceEndLocation,TraceStart,False);
 	if ( A == None )
-		HL = ET1;
-	dist1 = vSize(HL-Location);
+		TraceHitLocation = TraceEndLocation;
+	dist1 = vSize(TraceHitLocation-Location);
 	if ( Role < ROLE_Authority )
 	{
-		Cross = Spawn(class'TpsCross',Pp,,HL);
+		Cross = Spawn(class'TpsCross',Pp,,TraceHitLocation);
 		Cross.Drawscale = dist1/100*Pp.FovAngle/90;
 		Cross.Texture = Crosshair;
 		Cross.SpriteProjForward = 1;
+		
 	}
-	ET2 = ST + 5000 * X;
-	B = Trace(LL,HN,ET2,ST,True);
+	ET2 = TraceStart + 5000 * X;
+	B = Trace(LL,TraceHitNormal,ET2,TraceStart,True);
 	if ( B == None )
 		LL = ET2;
 	dist2 = vSize(LL-Location);
@@ -201,21 +205,29 @@ simulated function LaserSight()
 		Dot.Drawscale = dist2/2000*Pp.FovAngle/90;
 		Dot.SpriteProjForward = 1;
 	}
-	if ( vSize(LL-ST) < 80 )
+	if ( vSize(LL-TraceStart) < 80 )
 		Return;
 	dist3 = dist2/80;
 	scale = 1/(dist3+1);
 	if ( Level.NetMode == NM_Standalone )
-		WL = Pp.Location+Pp.Eyeheight*Z+Pp.Weapon.FireOffset.Y*Y+Pp.Weapon.FireOffset.Z*Z;
+	{
+		PlayerLoc = Pp.Location+Pp.Eyeheight*Z+Pp.Weapon.FireOffset.Y*Y+Pp.Weapon.FireOffset.Z*Z;
+	}
 	else
-		WL = ST;
-	GetAxes(rotator(LL-WL),X2,Y2,Z2);
+	{
+		PlayerLoc = TraceStart;
+	}
+		
+	GetAxes(rotator(LL-PlayerLoc),X2,Y2,Z2);
 	if ( Role < ROLE_Authority )
 	{
 		for ( i = 0 ; i < dist3+1 ; i++ )
 		{
-			Laser[i] = Spawn(class'TpsLaser',Pp,,WL + (i*40)*X2,rotator(LL-WL));
+			Laser[i] = Spawn(class'TpsLaser',Pp,,PlayerLoc + (i*40)*X2,rotator(LL-PlayerLoc));
 			Laser[i].Scaleglow = 1 - (i*scale);
+			Pp.ClientMessage("HitNormal " $ string(TraceHitNormal));
+			Pp.ClientMessage("HitLoc " $ string(TraceHitLocation));
+
 		}
 	}
 }

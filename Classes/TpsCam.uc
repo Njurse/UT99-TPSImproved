@@ -79,7 +79,7 @@ simulated function tick(float Deltatime)
 	}
 	Pp = PlayerPawn(Owner);
 	
-	YOffset = vect(0,30,0) >> Pp.ViewRotation;
+	YOffset = vect(0,23,0) >> Pp.ViewRotation;
 	if ( Role < ROLE_Authority || Level.NetMode == NM_Standalone)
 	{
 		if ( Pp.MyHUD.IsA('ChallengeHUD') )

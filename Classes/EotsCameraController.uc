@@ -158,6 +158,6 @@ defaultproperties
 	MinPitchLimit=-12000
 	MaxPitchLimit=8000
 	bHidden=True
-	RemoteRole=ROLE_SimulatedProxy
+	RemoteRole=ROLE_None
 	DrawType=DT_None
 }

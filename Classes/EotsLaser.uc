@@ -6,7 +6,7 @@ class EotsLaser expands Effects;
 defaultproperties
 {
      bOnlyOwnerSee=True
-     LifeSpan=0.100000
+     LifeSpan=0.000000
      bDirectional=True
      DrawType=DT_Mesh
      Style=STY_Translucent

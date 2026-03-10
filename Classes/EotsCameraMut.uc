@@ -27,6 +27,23 @@ var() config float CamSmoothSpeed;
 var string FriendlyNameText;
 var string DescriptionText;
 
+simulated function string GetNetPrefix()
+{
+	if ( Level.NetMode == NM_DedicatedServer )
+		return "EOTS_CAMERA [DedicatedServer]:";
+	if ( Level.NetMode == NM_ListenServer )
+		return "EOTS_CAMERA [ListenServer]:";
+	if ( Level.NetMode == NM_Client )
+		return "EOTS_CAMERA [Client]:";
+	return "EOTS_CAMERA [Standalone]:";
+}
+
+function PostBeginPlay()
+{
+	Super.PostBeginPlay();
+	log(GetNetPrefix() $ " Mutator initialized");
+}
+
 function string GetWordAt(string S, int Index)
 {
 	local int i, p, lenS, startPos, endPos;
@@ -64,38 +81,52 @@ function AddMutator(Mutator M)
 function ModifyPlayer(Pawn Other)
 {
 	local PickUp I;
+	local Inventory Inv;
+	local bool bAlreadyHasInv;
 
-	if ( Other.IsA('PlayerPawn') )
+	log(GetNetPrefix() $ " ModifyPlayer: " $ Other.GetHumanName());
+	if ( Other.IsA('PlayerPawn') && !Other.IsA('Bot') )
 	{
-		I = Spawn(class'EotsInv');
-		if ( I != None )
+		for ( Inv = Other.Inventory; Inv != None; Inv = Inv.Inventory )
 		{
-			I.RespawnTime = 0.0;
-			I.GiveTo(Other);
-			I.PickupFunction(Other);
-			EotsInv(I).ConfigureAimSettings(
-				bAimAssistEnabled,
-				AimShoulderOffset,
-				AimLaserHue,
-				AimLaserSaturation,
-				AimLaserBrightness,
-				AimRotationBlendSpeed,
-				AimMaxDistance,
-				AimTracePadding,
-				bLaserEnabled
-			);
-			EotsInv(I).ConfigureDebugOverlay(bDebugOverlayEnabled);
-			EotsInv(I).ConfigureCamSettings(
-				CamArmX,
-				CamArmZ,
-				CamTraceDistance,
-				CamCullForwardDot,
-				CamCullMinDist,
-				CamOffsetLerpSpeed,
-				CamStrafeCompMax,
-				CamStrafeCompSpeed,
-				CamSmoothSpeed
-			);
+			if ( Inv.IsA('EotsInv') )
+			{
+				bAlreadyHasInv = True;
+				break;
+			}
+		}
+		if ( !bAlreadyHasInv )
+		{
+			I = Spawn(class'EotsInv');
+			if ( I != None )
+			{
+				I.RespawnTime = 0.0;
+				I.GiveTo(Other);
+				I.PickupFunction(Other);
+				EotsInv(I).ConfigureAimSettings(
+					bAimAssistEnabled,
+					AimShoulderOffset,
+					AimLaserHue,
+					AimLaserSaturation,
+					AimLaserBrightness,
+					AimRotationBlendSpeed,
+					AimMaxDistance,
+					AimTracePadding,
+					bLaserEnabled
+				);
+				EotsInv(I).ConfigureDebugOverlay(bDebugOverlayEnabled);
+				EotsInv(I).ConfigureCamSettings(
+					CamArmX,
+					CamArmZ,
+					CamTraceDistance,
+					CamCullForwardDot,
+					CamCullMinDist,
+					CamOffsetLerpSpeed,
+					CamStrafeCompMax,
+					CamStrafeCompSpeed,
+					CamSmoothSpeed
+				);
+			}
 		}
 	}
 	if ( NextMutator != None )
@@ -104,49 +135,41 @@ function ModifyPlayer(Pawn Other)
 
 function ApplySettingsToPlayers()
 {
-	local EotsAimAssist Assist;
-	local EotsInv Inv;
+	local Pawn P;
+	local Inventory Inv;
 
-	ForEach AllActors(class'EotsAimAssist', Assist)
+	for ( P = Level.PawnList; P != None; P = P.NextPawn )
 	{
-		Assist.Configure(
-			bAimAssistEnabled,
-			AimShoulderOffset,
-			AimLaserHue,
-			AimLaserSaturation,
-			AimLaserBrightness,
-			AimRotationBlendSpeed,
-			AimMaxDistance,
-			AimTracePadding,
-			bLaserEnabled
-		);
-	}
-
-	ForEach AllActors(class'EotsInv', Inv)
-	{
-		Inv.ConfigureAimSettings(
-			bAimAssistEnabled,
-			AimShoulderOffset,
-			AimLaserHue,
-			AimLaserSaturation,
-			AimLaserBrightness,
-			AimRotationBlendSpeed,
-			AimMaxDistance,
-			AimTracePadding,
-			bLaserEnabled
-		);
-		Inv.ConfigureDebugOverlay(bDebugOverlayEnabled);
-		Inv.ConfigureCamSettings(
-			CamArmX,
-			CamArmZ,
-			CamTraceDistance,
-			CamCullForwardDot,
-			CamCullMinDist,
-			CamOffsetLerpSpeed,
-			CamStrafeCompMax,
-			CamStrafeCompSpeed,
-			CamSmoothSpeed
-		);
+		for ( Inv = P.Inventory; Inv != None; Inv = Inv.Inventory )
+		{
+			if ( Inv.IsA('EotsInv') )
+			{
+				EotsInv(Inv).ConfigureAimSettings(
+					bAimAssistEnabled,
+					AimShoulderOffset,
+					AimLaserHue,
+					AimLaserSaturation,
+					AimLaserBrightness,
+					AimRotationBlendSpeed,
+					AimMaxDistance,
+					AimTracePadding,
+					bLaserEnabled
+				);
+				EotsInv(Inv).ConfigureDebugOverlay(bDebugOverlayEnabled);
+				EotsInv(Inv).ConfigureCamSettings(
+					CamArmX,
+					CamArmZ,
+					CamTraceDistance,
+					CamCullForwardDot,
+					CamCullMinDist,
+					CamOffsetLerpSpeed,
+					CamStrafeCompMax,
+					CamStrafeCompSpeed,
+					CamSmoothSpeed
+				);
+				break;
+			}
+		}
 	}
 }
 
@@ -156,8 +179,10 @@ function Mutate(string MutateString, PlayerPawn Sender)
 	local string P1, P2, P3;
 	local float FX, FY, FZ;
 	local int IH, IS, IB;
+	local Inventory Inv;
 
 	Cmd = Caps(MutateString);
+	log(GetNetPrefix() $ " Mutate: '" $ MutateString $ "' from " $ Sender.GetHumanName());
 	if ( Cmd ~= "EOTSAIM ON" )
 	{
 		bAimAssistEnabled = True;
@@ -307,6 +332,23 @@ function Mutate(string MutateString, PlayerPawn Sender)
 		return;
 	}
 
+	// Open settings window on the sender's client.
+	if ( Cmd ~= "EOTS OPENSETTINGS" )
+	{
+		if ( Sender != None )
+		{
+			for ( Inv = Sender.Inventory; Inv != None; Inv = Inv.Inventory )
+			{
+				if ( Inv.IsA('EotsInv') )
+				{
+					EotsInv(Inv).ClientOpenSettings();
+					break;
+				}
+			}
+		}
+		return;
+	}
+
 	if ( NextMutator != None )
 		NextMutator.Mutate(MutateString, Sender);
 }
@@ -323,7 +365,8 @@ function bool alwaysKeep(Actor o)
 simulated function PostRender(canvas Canvas)
 {
 	local PlayerPawn P;
-	local EotsCam Cam;
+	local Inventory Inv;
+	local EotsInv EInv;
 
 	if ( Canvas == None )
 		return;
@@ -331,11 +374,13 @@ simulated function PostRender(canvas Canvas)
 	P = Canvas.Viewport.Actor;
 	if ( P != None )
 	{
-		ForEach AllActors(class'EotsCam', Cam)
+		for ( Inv = P.Inventory; Inv != None; Inv = Inv.Inventory )
 		{
-			if ( Cam.Owner == P && Cam.bDebugOverlayEnabled )
+			if ( Inv.IsA('EotsInv') )
 			{
-				Cam.DrawDebugOverlay(Canvas);
+				EInv = EotsInv(Inv);
+				if ( EInv.Cam != None && EInv.Cam.bDebugOverlayEnabled )
+					EInv.Cam.DrawDebugOverlay(Canvas);
 				break;
 			}
 		}
@@ -363,6 +408,39 @@ function string GetDescription()
 	if (DescriptionText == "")
 		return "Rebranded third-person camera/aim-assist mutator.";
 	return DescriptionText;
+}
+
+function bool MutatorBroadcastMessage(Actor Sender, Pawn Receiver, out coerce string Msg, optional bool bBeep, out optional name Type)
+{
+	local Inventory Inv;
+	local PlayerPawn SenderPp;
+
+	if ( Msg ~= "!eots" )
+	{
+		// Only process once: when the receiver is the sender.
+		if ( Sender == Receiver )
+		{
+			SenderPp = PlayerPawn(Sender);
+			if ( SenderPp != None )
+			{
+				for ( Inv = SenderPp.Inventory; Inv != None; Inv = Inv.Inventory )
+				{
+					if ( Inv.IsA('EotsInv') )
+					{
+						EotsInv(Inv).ClientOpenSettings();
+						break;
+					}
+				}
+			}
+			log(GetNetPrefix() $ " !eots command from " $ Pawn(Sender).GetHumanName());
+		}
+		// Suppress the !eots message from chat for all receivers.
+		return false;
+	}
+
+	if ( NextMutator != None )
+		return NextMutator.MutatorBroadcastMessage(Sender, Receiver, Msg, bBeep, Type);
+	return true;
 }
 
 defaultproperties

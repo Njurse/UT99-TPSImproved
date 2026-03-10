@@ -37,35 +37,51 @@ var() float StrafeCompensationSpeed;
 // How fast the camera orbit chases the player's look direction.
 // Higher = stiffer/more responsive.  Lower = floaty/relaxed.
 var() float CamSmoothSpeed;
+var bool bClientCameraSystemEnabled;
+var int ActiveLaserCount;
+var int OwnerSeeCounter;
 
 simulated function ResolveAimAssist()
 {
-	local EotsAimAssist A;
-
-	if ( AimAssist != None || Owner == None )
-		return;
-
-	ForEach AllActors(class'EotsAimAssist', A)
-	{
-		if ( A.Owner == Owner )
-		{
-			AimAssist = A;
-			return;
-		}
-	}
+	// AimAssist reference is now set directly by EotsInv when the camera
+	// is spawned, eliminating the per-tick AllActors scan.
 }
 
-replication
+simulated function SetClientCameraEnabled(bool bEnabled)
 {
-	reliable if ( Role == ROLE_Authority )
-		CamX, CamZ, AimTraceDistance, AimCullMinForwardDot, AimCullMinDistance,
-		OffsetLerpSpeed, StrafeCompensationMax, StrafeCompensationSpeed, CamSmoothSpeed;
+	local PlayerPawn Pp;
 
-	reliable if ( Role == ROLE_Authority )
-		CDO;
+	bClientCameraSystemEnabled = bEnabled;
+	Pp = PlayerPawn(Owner);
+	if ( !bEnabled )
+		DisableCameraForOwner(Pp);
+}
 
-	reliable if ( Role < ROLE_Authority )
-		Crosshair;
+simulated function DisableCameraForOwner(PlayerPawn Pp)
+{
+	local int i;
+
+	for ( i = 0; i < 99; i++ )
+	{
+		if ( Laser[i] == None )
+			break;
+		Laser[i].Destroy();
+		Laser[i] = None;
+	}
+	ActiveLaserCount = 0;
+
+	if ( Pp == None )
+		return;
+
+	if ( Pp.ViewTarget == Self )
+		Pp.ViewTarget = None;
+	Pp.bBehindView = False;
+
+	if ( cHUD != None )
+		cHUD.Crosshair = OriginalCrosshair;
+
+	if ( Pp.Weapon != None )
+		Pp.Weapon.bOwnsCrossHair = False;
 }
 
 simulated function vector GetShakeOffset(float ElapsedTime, float Intensity, float Frequency)
@@ -104,17 +120,14 @@ simulated function tick(float Deltatime)
 		Destroy();
 		Return;
 	}
-	for ( i = 0 ; i < 99 ; i++ )
-	{
-		if ( Laser[i] != None )
-			Laser[i].Destroy();
-		else
-			Break;
-	}
 	Pp = PlayerPawn(Owner);
 	if ( Pp == None )
 		return;
-	ResolveAimAssist();
+	if ( !bClientCameraSystemEnabled )
+	{
+		DisableCameraForOwner(Pp);
+		return;
+	}
 	EnsureCamController();
 
 	// Phase 1: capture pure player input BEFORE aim-assist can write ViewRotation.
@@ -158,9 +171,7 @@ simulated function tick(float Deltatime)
 		YOffset.Y = 23;
 	}
 	YOffset = YOffset >> CamRot;
-	if ( Role < ROLE_Authority || Level.NetMode == NM_Standalone)
-	{
-		if ( Pp.MyHUD.IsA('ChallengeHUD') )
+	if ( Pp.MyHUD.IsA('ChallengeHUD') )
 			cHUD = ChallengeHUD(Pp.MyHUD);
 		if ( Crosshair == None && cHUD != None )
 		{
@@ -252,7 +263,7 @@ simulated function tick(float Deltatime)
 		Pp.ViewRotation = rotator(ScreenCenterAimPoint - HeadPos);
 		LastTraceRot = Pp.ViewRotation;
 		Pp.ViewRotation.Roll = 0;
-		if ( Role == ROLE_Authority )
+		if ( Pp.Role == ROLE_Authority )
 		{
 			CamRot = Pp.ViewRotation;
 			CamRot.Pitch = 0;
@@ -268,32 +279,31 @@ simulated function tick(float Deltatime)
 	LastPlayerViewRot = Pp.ViewRotation;
 	LastCamViewRot = CamRot;
 
-	OwnerSee();
-	if ( bLaserEnabled )
-		LaserSight();
-	if ( MyTimer <= 0.01 )
-		MyTimer += Deltatime;
-	if ( MyTimer >= 0.01 )
+	OwnerSeeCounter++;
+	if ( OwnerSeeCounter >= 5 )
 	{
-
-		if ( Role < ROLE_Authority || Level.NetMode == NM_Standalone )
-		{
-			SetRotation(CamRot);
-
-			// Lerp toward target, then clamp against geometry so the camera
-			// cannot glide through walls during the interpolation step.
-			RL = LerpVector(Location, TraceHitLocation + YOffset, 0.37);
-			if ( Trace(SafeAimPoint, TraceHitNormal, RL, Pp.Location, false) != None )
-				RL = SafeAimPoint + TraceHitNormal * 6;
-			SetLocation(RL);
-
-			if ( cHUD != None )
-				cHUD.Crosshair = OriginalCrosshair;
-		}
-		if ( Pp.Weapon != None )
-			Pp.Weapon.bOwnsCrossHair = False;
+		OwnerSeeCounter = 0;
+		OwnerSee();
 	}
-	}
+
+	if ( bLaserEnabled )
+		UpdateLaserSight();
+	else
+		HideAllLasers();
+
+	SetRotation(CamRot);
+
+	// Lerp toward target, then clamp against geometry so the camera
+	// cannot glide through walls during the interpolation step.
+	RL = LerpVector(Location, TraceHitLocation + YOffset, 0.37);
+	if ( Trace(SafeAimPoint, TraceHitNormal, RL, Pp.Location, false) != None )
+		RL = SafeAimPoint + TraceHitNormal * 6;
+	SetLocation(RL);
+
+	if ( cHUD != None )
+		cHUD.Crosshair = OriginalCrosshair;
+	if ( Pp.Weapon != None )
+		Pp.Weapon.bOwnsCrossHair = False;
 }
 
 // Spawns the camera controller if it does not yet exist.
@@ -324,11 +334,28 @@ simulated function vector CamAimTrace(vector CamPos, vector CamForward)
 
 simulated function LaserSight()
 {
+	// Deprecated — use UpdateLaserSight() for pooled laser management.
+}
+
+simulated function HideAllLasers()
+{
+	local int i;
+
+	for ( i = 0; i < ActiveLaserCount; i++ )
+	{
+		if ( Laser[i] != None )
+			Laser[i].bHidden = True;
+	}
+	ActiveLaserCount = 0;
+}
+
+simulated function UpdateLaserSight()
+{
 	Local Vector X2,Y2,Z2,X,Y,Z,TraceHitLocation,TraceHitNormal,TraceStart,LL,PlayerLoc;
 	local actor A;
 	Local PlayerPawn Pp;
 	local float dist2,dist3,scale;
-	local int i;
+	local int i, NeededCount;
 
 	Pp = PlayerPawn(Owner);
 	if ( Pp == None )
@@ -347,8 +374,7 @@ simulated function LaserSight()
 			TraceStart = Pp.Location + Pp.Eyeheight * Z;
 		else
 		{
-			if ( Role == ROLE_Authority )
-				CDO = Pp.Weapon.CalcDrawOffset()
+			CDO = Pp.Weapon.CalcDrawOffset()
 				+ Pp.Weapon.FireOffset.Y * Y + Pp.Weapon.FireOffset.Z * Z;
 			TraceStart = Pp.Location + CDO + vect(0,0,20);
 		}
@@ -360,24 +386,43 @@ simulated function LaserSight()
 	LL = TraceHitLocation;
 	dist2 = vSize(LL-Location);
 	if ( vSize(LL-TraceStart) < 80 )
+	{
+		HideAllLasers();
 		Return;
+	}
 	dist3 = dist2/10;
 	scale = 1/(dist3+1);
+
 	if ( Level.NetMode == NM_Standalone )
 	{
-		PlayerLoc = Pp.Location+Pp.Eyeheight*Z+Pp.Weapon.FireOffset.Y*Y+Pp.Weapon.FireOffset.Z*Z;
+		if ( Pp.Weapon != None )
+			PlayerLoc = Pp.Location+Pp.Eyeheight*Z+Pp.Weapon.FireOffset.Y*Y+Pp.Weapon.FireOffset.Z*Z;
+		else
+			PlayerLoc = TraceStart;
 	}
 	else
 	{
 		PlayerLoc = TraceStart;
 	}
-		
+
 	GetAxes(rotator(LL-PlayerLoc),X2,Y2,Z2);
-	if ( Role < ROLE_Authority || Level.NetMode == NM_Standalone )
+
+	NeededCount = int(dist3) + 1;
+	if ( NeededCount > 99 )
+		NeededCount = 99;
+
+	for ( i = 0; i < NeededCount; i++ )
 	{
-		for ( i = 0 ; i < dist3+1 ; i++ )
-		{
+		if ( Laser[i] == None )
 			Laser[i] = Spawn(class'EotsLaser',Pp,,PlayerLoc + (i*10)*X2,rotator(LL-PlayerLoc));
+		else
+		{
+			Laser[i].SetLocation(PlayerLoc + (i*10)*X2);
+			Laser[i].SetRotation(rotator(LL-PlayerLoc));
+			Laser[i].bHidden = False;
+		}
+		if ( Laser[i] != None )
+		{
 			Laser[i].Scaleglow = 1 - (i*scale);
 			if ( AimAssist != None )
 			{
@@ -388,9 +433,16 @@ simulated function LaserSight()
 				Laser[i].LightBrightness = AimAssist.LaserBrightness;
 				Laser[i].AmbientGlow = AimAssist.LaserBrightness;
 			}
-
 		}
 	}
+
+	// Hide excess lasers from previous frame.
+	for ( i = NeededCount; i < ActiveLaserCount; i++ )
+	{
+		if ( Laser[i] != None )
+			Laser[i].bHidden = True;
+	}
+	ActiveLaserCount = NeededCount;
 }
 
 simulated function OwnerSee()
@@ -439,8 +491,12 @@ simulated function PostRender(canvas Canvas)
 
 simulated function Destroyed()
 {
-	if ( cHUD != None && Role < ROLE_Authority )
-		cHUD.Crosshair = OriginalCrosshair;
+	DisableCameraForOwner(PlayerPawn(Owner));
+	if ( CamController != None )
+	{
+		CamController.Destroy();
+		CamController = None;
+	}
 	Super.Destroyed();
 }
 
@@ -451,9 +507,9 @@ simulated function vector LerpVector(vector Start, vector End, float Alpha)
 
 defaultproperties
 {
-     CamX=90
-     CamZ=32
-     AimTraceDistance=100000.000000
+	CamX=90
+	CamZ=32
+	AimTraceDistance=100000.000000
 	AimCullMinForwardDot=0.300000
 	AimCullMinDistance=96.000000
 	OffsetLerpSpeed=8.000000
@@ -462,7 +518,9 @@ defaultproperties
 	CamSmoothSpeed=15.000000
 	bDebugOverlayEnabled=True
 	bLaserEnabled=False
-     RemoteRole=ROLE_SimulatedProxy 
-     DrawType=DT_None
-     Style=STY_None
+	bClientCameraSystemEnabled=True
+	bHidden=True
+	RemoteRole=ROLE_None
+	DrawType=DT_None
+	Style=STY_None
 }

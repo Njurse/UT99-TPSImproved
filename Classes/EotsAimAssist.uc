@@ -15,13 +15,6 @@ var float TracePadding;
 
 var vector CurrentAimPoint;
 
-replication
-{
-	reliable if ( Role == ROLE_Authority )
-		bEnabled, ShoulderOffset, LaserHue, LaserSaturation, LaserBrightness,
-		RotationBlendSpeed, MaxAimDistance, TracePadding, CurrentAimPoint;
-}
-
 simulated function Configure(
 	bool bInEnabled,
 	vector InShoulderOffset,
@@ -141,7 +134,7 @@ simulated function rotator UpdateRotation(PlayerPawn Pp, float DeltaTime)
 	NewRot = BlendRotation(Pp.ViewRotation, TargetRot, Alpha);
 
 	Pp.ViewRotation = NewRot;
-	if ( Role == ROLE_Authority )
+	if ( Pp.Role == ROLE_Authority )
 		Pp.SetRotation(NewRot);
 
 	return NewRot;
@@ -181,7 +174,7 @@ simulated function rotator UpdateRotationFromCamera(
 	{
 		// No aim assist: snap view directly to camera aim, no blend.
 		Pp.ViewRotation = TargetRot;
-		if ( Role == ROLE_Authority )
+		if ( Pp.Role == ROLE_Authority )
 		{
 			TargetRot.Pitch = 0;
 			TargetRot.Roll = 0;
@@ -193,7 +186,7 @@ simulated function rotator UpdateRotationFromCamera(
 	Alpha = FClamp(RotationBlendSpeed * DeltaTime, 0.0, 1.0);
 	NewRot = BlendRotation(Pp.ViewRotation, TargetRot, Alpha);
 	Pp.ViewRotation = NewRot;
-	if ( Role == ROLE_Authority )
+	if ( Pp.Role == ROLE_Authority )
 	{
 		TargetRot = NewRot;
 		TargetRot.Pitch = 0;
@@ -215,6 +208,6 @@ defaultproperties
 	MaxAimDistance=12000.000000
 	TracePadding=4.000000
 	bHidden=True
-	RemoteRole=ROLE_SimulatedProxy
+	RemoteRole=ROLE_None
 	DrawType=DT_None
 }

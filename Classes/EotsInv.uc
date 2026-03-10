@@ -24,8 +24,60 @@ var float CamOffsetLerpSpeed;
 var float CamStrafeCompMax;
 var float CamStrafeCompSpeed;
 var float CamSmoothSpeed;
+var bool bClientCameraSystemEnabled;
+var bool bClientSettingsInitialized;
+var int SettingsRevision;
+var int LastAppliedRevision;
 
-function ConfigureAimSettings(
+replication
+{
+	reliable if ( Role == ROLE_Authority )
+		bAimAssistEnabled, AimShoulderOffset, AimLaserHue,
+		AimLaserSaturation, AimLaserBrightness, AimRotationBlendSpeed,
+		AimMaxDistance, AimTracePadding, bLaserEnabled, bDebugOverlayEnabled,
+		CamArmX, CamArmZ, CamTraceDistance, CamCullForwardDot,
+		CamCullMinDist, CamOffsetLerpSpeed, CamStrafeCompMax,
+		CamStrafeCompSpeed, CamSmoothSpeed, SettingsRevision,
+		ClientOpenSettings;
+}
+
+simulated function string GetNetPrefix()
+{
+	if ( Level.NetMode == NM_DedicatedServer )
+		return "EOTS_CAMERA [DedicatedServer]:";
+	if ( Level.NetMode == NM_ListenServer )
+		return "EOTS_CAMERA [ListenServer]:";
+	if ( Level.NetMode == NM_Client )
+		return "EOTS_CAMERA [Client]:";
+	return "EOTS_CAMERA [Standalone]:";
+}
+
+simulated function bool IsLocalViewportOwner()
+{
+	local PlayerPawn Pp;
+
+	Pp = PlayerPawn(Owner);
+	return Pp != None && Pp.Player != None && Viewport(Pp.Player) != None;
+}
+
+simulated function InitializeClientSettings()
+{
+	if ( bClientSettingsInitialized )
+		return;
+
+	bClientCameraSystemEnabled = class'EotsClientConfig'.static.IsCameraSystemEnabled();
+	bClientSettingsInitialized = True;
+}
+
+simulated function SetClientCameraSystemEnabled(bool bEnabled)
+{
+	InitializeClientSettings();
+	bClientCameraSystemEnabled = bEnabled;
+	class'EotsClientConfig'.static.SetCameraSystemEnabled(bEnabled);
+	ApplyMutatorSettings();
+}
+
+simulated function ConfigureAimSettings(
 	bool bInEnabled,
 	vector InShoulderOffset,
 	byte InLaserHue,
@@ -47,10 +99,12 @@ function ConfigureAimSettings(
 	AimTracePadding = InTracePadding;
 	bLaserEnabled = bInLaserEnabled;
 
+	if ( Role == ROLE_Authority )
+		SettingsRevision++;
 	ApplyMutatorSettings();
 }
 
-function ApplyMutatorSettings()
+simulated function ApplyMutatorSettings()
 {
 	if ( AimAssist != None )
 	{
@@ -71,6 +125,7 @@ function ApplyMutatorSettings()
 	{
 		Cam.bDebugOverlayEnabled = bDebugOverlayEnabled;
 		Cam.bLaserEnabled = bLaserEnabled;
+		Cam.SetClientCameraEnabled(bClientCameraSystemEnabled);
 		Cam.CamX = CamArmX;
 		Cam.CamZ = CamArmZ;
 		Cam.AimTraceDistance = CamTraceDistance;
@@ -83,13 +138,15 @@ function ApplyMutatorSettings()
 	}
 }
 
-function ConfigureDebugOverlay(bool bInEnabled)
+simulated function ConfigureDebugOverlay(bool bInEnabled)
 {
 	bDebugOverlayEnabled = bInEnabled;
+	if ( Role == ROLE_Authority )
+		SettingsRevision++;
 	ApplyMutatorSettings();
 }
 
-function ConfigureCamSettings(
+simulated function ConfigureCamSettings(
 	int InArmX,
 	int InArmZ,
 	float InTraceDist,
@@ -110,17 +167,15 @@ function ConfigureCamSettings(
 	CamStrafeCompMax = InStrafeCompMax;
 	CamStrafeCompSpeed = InStrafeCompSpeed;
 	CamSmoothSpeed = InSmoothSpeed;
+	if ( Role == ROLE_Authority )
+		SettingsRevision++;
 	ApplyMutatorSettings();
 }
 
 function PickupFunction(Pawn Other)
 {
-	if ( Cam == None )
-		Cam = Spawn(class'EotsCam',Other);
-	if ( AimAssist == None )
-		AimAssist = Spawn(class'EotsAimAssist',Other);
-
-	ApplyMutatorSettings();
+	// Camera actors are spawned client-side in Tick.  Server just logs.
+	log(GetNetPrefix() $ " Inventory attached to " $ Other.GetHumanName());
 }
 
 simulated function Tick(Float Deltatime)
@@ -132,6 +187,61 @@ simulated function Tick(Float Deltatime)
 		Destroy();
 		Return;
 	}
+
+	if ( !IsLocalViewportOwner() )
+		return;
+
+	InitializeClientSettings();
+	if ( Cam == None )
+	{
+		Cam = Spawn(class'EotsCam', Owner);
+		AimAssist = Spawn(class'EotsAimAssist', Owner);
+		Cam.AimAssist = AimAssist;
+		ApplyMutatorSettings();
+		log(GetNetPrefix() $ " Client camera spawned for " $ Owner.GetHumanName());
+	}
+
+	// Detect replicated settings changes from the server.
+	if ( SettingsRevision != LastAppliedRevision )
+	{
+		ApplyMutatorSettings();
+		LastAppliedRevision = SettingsRevision;
+		log(GetNetPrefix() $ " Config sync received (rev " $ string(SettingsRevision) $ ")");
+	}
+}
+
+simulated function ConfigureFromLocalDefaults()
+{
+	bAimAssistEnabled = class'EotsCameraMut'.default.bAimAssistEnabled;
+	AimShoulderOffset = class'EotsCameraMut'.default.AimShoulderOffset;
+	AimLaserHue = class'EotsCameraMut'.default.AimLaserHue;
+	AimLaserSaturation = class'EotsCameraMut'.default.AimLaserSaturation;
+	AimLaserBrightness = class'EotsCameraMut'.default.AimLaserBrightness;
+	AimRotationBlendSpeed = class'EotsCameraMut'.default.AimRotationBlendSpeed;
+	AimMaxDistance = class'EotsCameraMut'.default.AimMaxDistance;
+	AimTracePadding = class'EotsCameraMut'.default.AimTracePadding;
+	bLaserEnabled = class'EotsCameraMut'.default.bLaserEnabled;
+	bDebugOverlayEnabled = class'EotsCameraMut'.default.bDebugOverlayEnabled;
+	CamArmX = class'EotsCameraMut'.default.CamArmX;
+	CamArmZ = class'EotsCameraMut'.default.CamArmZ;
+	CamTraceDistance = class'EotsCameraMut'.default.CamTraceDistance;
+	CamCullForwardDot = class'EotsCameraMut'.default.CamCullForwardDot;
+	CamCullMinDist = class'EotsCameraMut'.default.CamCullMinDist;
+	CamOffsetLerpSpeed = class'EotsCameraMut'.default.CamOffsetLerpSpeed;
+	CamStrafeCompMax = class'EotsCameraMut'.default.CamStrafeCompMax;
+	CamStrafeCompSpeed = class'EotsCameraMut'.default.CamStrafeCompSpeed;
+	CamSmoothSpeed = class'EotsCameraMut'.default.CamSmoothSpeed;
+	ApplyMutatorSettings();
+}
+
+exec function EOTSCameraSystemEnable(bool bEnable)
+{
+	SetClientCameraSystemEnabled(bEnable);
+}
+
+exec function EOTSCameraSystemToggle()
+{
+	SetClientCameraSystemEnabled(!bClientCameraSystemEnabled);
 }
 
 exec function EOTSaimEnable(bool bEnable)
@@ -168,6 +278,49 @@ exec function EOTSaimSetLaserColor(byte Hue, byte Saturation, byte Brightness)
 	PlayerPawn(Owner).ConsoleCommand("mutate eotsaim laser " $ string(Hue) $ " " $ string(Saturation) $ " " $ string(Brightness));
 }
 
+exec function EOTSOpenSettings()
+{
+	OpenSettingsWindow();
+}
+
+simulated function OpenSettingsWindow()
+{
+	local PlayerPawn Pp;
+	local WindowConsole WC;
+
+	Pp = PlayerPawn(Owner);
+	if ( Pp == None || Pp.Player == None || Viewport(Pp.Player) == None )
+		return;
+
+	WC = WindowConsole(Viewport(Pp.Player).Console);
+	if ( WC == None || WC.Root == None )
+		return;
+
+	WC.bQuickKeyEnable = True;
+	WC.LaunchUWindow();
+	WC.Root.CreateWindow(class'EotsSettingsWindow', 100, 80, 380, 560, None, True);
+}
+
+simulated function ClientOpenSettings()
+{
+	OpenSettingsWindow();
+}
+
+simulated function Destroyed()
+{
+	if ( Cam != None )
+	{
+		Cam.Destroy();
+		Cam = None;
+	}
+	if ( AimAssist != None )
+	{
+		AimAssist.Destroy();
+		AimAssist = None;
+	}
+	Super.Destroyed();
+}
+
 defaultproperties
 {
 	bAimAssistEnabled=False
@@ -189,4 +342,5 @@ defaultproperties
 	CamStrafeCompMax=25.000000
 	CamStrafeCompSpeed=5.000000
 	CamSmoothSpeed=15.000000
+	bClientCameraSystemEnabled=True
 }

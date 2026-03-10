@@ -4,6 +4,7 @@
 //=============================================================================
 class EotsSettingsClientWindow expands UMenuPageWindow;
 
+var UWindowCheckbox CameraSystemCheck;
 var UWindowCheckbox AimAssistCheck;
 var UWindowCheckbox LaserCheck;
 var UWindowCheckbox DebugOverlayCheck;
@@ -26,6 +27,24 @@ var UWindowEditControl CamSmoothSpeedEdit;
 var UWindowEditControl StrafeCompMaxEdit;
 var UWindowEditControl StrafeCompSpeedEdit;
 
+function EotsInv FindLocalEotsInv()
+{
+	local PlayerPawn P;
+	local Inventory Inv;
+
+	P = GetPlayerOwner();
+	if ( P == None )
+		return None;
+
+	for ( Inv = P.Inventory; Inv != None; Inv = Inv.Inventory )
+	{
+		if ( Inv.IsA('EotsInv') )
+			return EotsInv(Inv);
+	}
+
+	return None;
+}
+
 function Created()
 {
 	local float RowY, Margin, CtrlW;
@@ -35,6 +54,11 @@ function Created()
 	CtrlW = WinWidth - Margin * 2;
 
 	RowY = 26;
+	CameraSystemCheck = UWindowCheckbox(CreateControl(class'UWindowCheckbox', Margin, RowY, CtrlW, 1));
+	CameraSystemCheck.SetText("Enable Camera System (client only)");
+	CameraSystemCheck.SetHelpText("Turns the entire EOTS third-person camera system on or off only for this client.");
+
+	RowY += 24;
 	AimAssistCheck = UWindowCheckbox(CreateControl(class'UWindowCheckbox', Margin, RowY, CtrlW, 1));
 	AimAssistCheck.SetText("Enable Aim Assist");
 	AimAssistCheck.SetHelpText("Master toggle for EOTS aim-assist behavior.");
@@ -180,6 +204,7 @@ function Created()
 
 function LoadValues()
 {
+	CameraSystemCheck.bChecked = class'EotsClientConfig'.static.IsCameraSystemEnabled();
 	AimAssistCheck.bChecked = class'EotsCameraMut'.default.bAimAssistEnabled;
 	LaserCheck.bChecked = class'EotsCameraMut'.default.bLaserEnabled;
 	DebugOverlayCheck.bChecked = class'EotsCameraMut'.default.bDebugOverlayEnabled;
@@ -200,7 +225,17 @@ function LoadValues()
 	StrafeCompSpeedEdit.SetValue(string(int(class'EotsCameraMut'.default.CamStrafeCompSpeed)));
 }
 
-function SaveValues()
+function SaveClientValues()
+{
+	local EotsInv Inv;
+
+	class'EotsClientConfig'.static.SetCameraSystemEnabled(CameraSystemCheck.bChecked);
+	Inv = FindLocalEotsInv();
+	if ( Inv != None )
+		Inv.SetClientCameraSystemEnabled(CameraSystemCheck.bChecked);
+}
+
+function SaveServerValues()
 {
 	local float fx, fy, fz, blendspeed, maxdist, tracepad;
 	local int icamx, icamz, iculdot;
@@ -269,13 +304,31 @@ function SaveValues()
 			$ string(strafespeed));
 }
 
+function SaveValues()
+{
+	local EotsInv Inv;
+
+	SaveClientValues();
+	SaveServerValues();
+
+	Inv = FindLocalEotsInv();
+	if ( Inv != None )
+		Inv.ConfigureFromLocalDefaults();
+}
+
 function Notify(UWindowDialogControl C, byte E)
 {
 	Super.Notify(C, E);
 
+	if ( E == DE_Change && C == CameraSystemCheck )
+	{
+		SaveClientValues();
+		return;
+	}
+
 	// Checkboxes take effect immediately.
 	if ( E == DE_Change && (C == AimAssistCheck || C == LaserCheck || C == DebugOverlayCheck) )
-		SaveValues();
+		SaveServerValues();
 
 	// Save button commits numeric fields.
 	if ( C == SaveButton && E == DE_Click )

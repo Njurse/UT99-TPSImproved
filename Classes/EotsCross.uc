@@ -1,7 +1,7 @@
 //=============================================================================
-// TpsDot.
+// EotsCross.
 //=============================================================================
-class TpsDot expands Effects;
+class EotsCross expands Effects;
 
 defaultproperties
 {
@@ -10,8 +10,7 @@ defaultproperties
      bDirectional=True
      DrawType=DT_Sprite
      Style=STY_Translucent
-     Texture=Texture'Tps.TpsDot'
+     Texture=None
      AmbientGlow=255
-     SpriteProjForward=0.000000
      bUnlit=True
 }

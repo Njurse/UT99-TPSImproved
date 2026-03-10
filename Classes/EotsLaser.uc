@@ -1,7 +1,7 @@
 //=============================================================================
-// TpsLaser.
+// EotsLaser.
 //=============================================================================
-class TpsLaser expands Effects;
+class EotsLaser expands Effects;
 
 defaultproperties
 {
@@ -10,8 +10,6 @@ defaultproperties
      bDirectional=True
      DrawType=DT_Mesh
      Style=STY_Translucent
-     Texture=Texture'Tps.TpsLaser'
-     Skin=Texture'Tps.TpsLaser'
      Mesh=LodMesh'Botpack.PBolt'
      DrawScale=1.0
      bUnlit=True

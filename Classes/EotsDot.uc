@@ -1,7 +1,7 @@
 //=============================================================================
-// TpsCross.
+// EotsDot.
 //=============================================================================
-class TpsCross expands Effects;
+class EotsDot expands Effects;
 
 defaultproperties
 {
@@ -10,7 +10,8 @@ defaultproperties
      bDirectional=True
      DrawType=DT_Sprite
      Style=STY_Translucent
-     Texture=None
+     Texture=Texture'Botpack.Icons.Chair1'
      AmbientGlow=255
+     SpriteProjForward=0.000000
      bUnlit=True
 }

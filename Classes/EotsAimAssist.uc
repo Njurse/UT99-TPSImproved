@@ -30,7 +30,8 @@ simulated function Configure(
 	byte InLaserBrightness,
 	float InRotationBlendSpeed,
 	float InMaxAimDistance,
-	float InTracePadding
+	float InTracePadding,
+	bool bInLaserEnabled
 )
 {
 	bEnabled = bInEnabled;

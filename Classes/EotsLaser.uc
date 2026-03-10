@@ -11,6 +11,6 @@ defaultproperties
      DrawType=DT_Mesh
      Style=STY_Translucent
      Mesh=LodMesh'Botpack.PBolt'
-     DrawScale=1.0
+     DrawScale=0.15
      bUnlit=True
 }

@@ -1,0 +1,3 @@
+[Public]
+Object=(Name=EOTSCamera.EotsCameraMut,Class=Class,MetaClass=Engine.Mutator,Description="EOTS Camera,Rebranded third-person camera/aim-assist mutator.")
+Object=(Name=EOTSCamera.EotsModMenuItem,Class=Class,MetaClass=UMenu.UMenuModMenuItem,Description="EOTS Camera Settings")

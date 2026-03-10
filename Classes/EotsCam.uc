@@ -3,8 +3,6 @@
 //=============================================================================
 class EotsCam expands Actor;
 Var() int CamX,CamZ;
-Var EotsDot Dot;
-Var EotsCross Cross;
 Var EotsLaser Laser[99];
 Var EotsAimAssist AimAssist;
 Var ChallengeHUD cHUD;
@@ -12,9 +10,33 @@ Var Texture Crosshair;
 Var int OriginalCrosshair;
 var float MyTimer;
 var vector CDO;
-var int CCamX,CCamZ,DCamX,DCamZ;
+
 var EotsCameraController CamController;
 var float AimTraceDistance;
+var float AimCullMinForwardDot;
+var float AimCullMinDistance;
+var bool bDebugOverlayEnabled;
+var bool bLaserEnabled;
+var rotator LastPlayerViewRot;
+var rotator LastCamViewRot;
+var rotator LastTraceRot;
+
+// Client-side smoothed shoulder offset.  Lerps toward AimAssist.ShoulderOffset
+// each tick so changes to the offset animate in rather than snapping.
+var vector CurrentShoulderOffset;
+var bool bOffsetInitialized;
+var() float OffsetLerpSpeed;
+
+// Strafe compensation: shifts the camera laterally in the direction of player
+// movement so the character stays toward the screen edge and doesn't drift
+// into the centre of the view while strafing.
+var float CurrentStrafeOffset;
+var() float StrafeCompensationMax;
+var() float StrafeCompensationSpeed;
+
+// How fast the camera orbit chases the player's look direction.
+// Higher = stiffer/more responsive.  Lower = floaty/relaxed.
+var() float CamSmoothSpeed;
 
 simulated function ResolveAimAssist()
 {
@@ -36,7 +58,8 @@ simulated function ResolveAimAssist()
 replication
 {
 	reliable if ( Role == ROLE_Authority )
-		CamX,CamZ;
+		CamX, CamZ, AimTraceDistance, AimCullMinForwardDot, AimCullMinDistance,
+		OffsetLerpSpeed, StrafeCompensationMax, StrafeCompensationSpeed, CamSmoothSpeed;
 
 	reliable if ( Role == ROLE_Authority )
 		CDO;
@@ -70,21 +93,17 @@ simulated function rotator GetShakeRotation(float ElapsedTime, float Intensity, 
 simulated function tick(float Deltatime)
 {
 	Local Actor A,B;
-	Local Vector X,Y,Z,TraceHitLocation,TraceHitNormal,RL,YOffset,HeadPos,ScreenCenterAimPoint;
+	Local Vector X,Y,Z,TraceHitLocation,TraceHitNormal,RL,YOffset,HeadPos,ScreenCenterAimPoint,SafeAimPoint,AimDir;
 	Local PlayerPawn Pp;
-	Local Int I,TCamX,TCamZ;
-	Local Float Scale1,Scale2;
+	Local Int I;
 	Local rotator CamRot;
+	Local float StrafeVel, TargetStrafeOffset;
 
 	if ( Owner == none || Owner.Physics == PHYS_None || Pawn(Owner).Health <= 0 )
 	{
 		Destroy();
 		Return;
 	}
-	if ( Cross != None )
-		Cross.Destroy();
-	if ( Dot != None )
-		Dot.Destroy();
 	for ( i = 0 ; i < 99 ; i++ )
 	{
 		if ( Laser[i] != None )
@@ -107,6 +126,7 @@ simulated function tick(float Deltatime)
 	// position is known, to break the rotation feedback loop causing drift.
 	if ( CamController != None )
 	{
+		CamController.SmoothSpeed = CamSmoothSpeed;
 		CamController.SmoothCamera(DeltaTime);
 		CamRot = CamController.GetCameraRotation();
 	}
@@ -115,7 +135,29 @@ simulated function tick(float Deltatime)
 		CamRot = Pp.ViewRotation;
 	}
 
-	YOffset = vect(0,23,0) >> CamRot;
+	// Lerp the shoulder offset client-side so changes animate smoothly
+	// instead of snapping.  On the first tick we snap to avoid a swim-in
+	// from the world origin.
+	if ( AimAssist != None )
+	{
+		if ( !bOffsetInitialized )
+		{
+			CurrentShoulderOffset = AimAssist.ShoulderOffset;
+			bOffsetInitialized = True;
+		}
+		else
+		{
+			CurrentShoulderOffset.X += (AimAssist.ShoulderOffset.X - CurrentShoulderOffset.X) * FClamp(OffsetLerpSpeed * DeltaTime, 0.0, 1.0);
+			CurrentShoulderOffset.Y += (AimAssist.ShoulderOffset.Y - CurrentShoulderOffset.Y) * FClamp(OffsetLerpSpeed * DeltaTime, 0.0, 1.0);
+			CurrentShoulderOffset.Z += (AimAssist.ShoulderOffset.Z - CurrentShoulderOffset.Z) * FClamp(OffsetLerpSpeed * DeltaTime, 0.0, 1.0);
+		}
+		YOffset.Y = CurrentShoulderOffset.Y;
+	}
+	else
+	{
+		YOffset.Y = 23;
+	}
+	YOffset = YOffset >> CamRot;
 	if ( Role < ROLE_Authority || Level.NetMode == NM_Standalone)
 	{
 		if ( Pp.MyHUD.IsA('ChallengeHUD') )
@@ -149,48 +191,66 @@ simulated function tick(float Deltatime)
 			Pp.bBehindView = False;
 	}
 	Getaxes(CamRot,X,Y,Z);
-	
-	CCamX = CamX;
-	CCamZ = CamZ;
-	A = Trace(RL,TraceHitNormal,Pp.Location+CamZ*Z,Pp.Location,false);
-	if ( A == None )
-		RL = Pp.Location+CamZ*Z + YOffset;
-	else
+
+	// Now that camera-space axes are known, apply ShoulderOffset X (forward/back)
+	// and Z (up/down) using the smoothed value so all three axes lerp together.
+	if ( AimAssist != None )
 	{
-		RL -= 2*Z;
-		Scale1 = vsize(RL-Pp.Location)/float(CamZ);
-		TCamX = Scale1*CamX;
-		if ( TCamX < DCamX )
-			DCamX = TCamX;
-	}
-	B = Trace(TraceHitLocation,TraceHitNormal,RL-CCamX*X,RL,false);
-	if ( B == None )
-		TraceHitLocation = RL-CCamX*X;
-	else
-	{
-		TraceHitLocation += 5*X;
-		Scale2 = vsize(TraceHitLocation-RL)/float(CamX);
-		TCamZ = Scale2*CamZ;
-		if ( TCamZ < DCamZ )
-			DCamZ = TCamZ;
+		YOffset += CurrentShoulderOffset.X * X;
+		YOffset += CurrentShoulderOffset.Z * Z;
 	}
 
-	// Phase 4: trace from the camera's target world position along its forward
-	// vector to find the stable screen-centre world aim point.  This trace uses
-	// the camera's independent orbit direction — NOT Pp.ViewRotation — which is
-	// the key change that eliminates the rotation feedback drift.
+	// Strafe compensation: project player velocity onto the camera right axis,
+	// normalise by approximate UT max strafe speed (350 u/s), then lerp a
+	// lateral camera shift in the same direction.  This keeps the character
+	// pushed toward the shoulder edge of the screen during lateral movement.
+	if ( StrafeCompensationMax > 0 )
+	{
+		StrafeVel = Pp.Velocity Dot Y;
+		TargetStrafeOffset = FClamp(StrafeVel / 350.0, -1.0, 1.0) * StrafeCompensationMax;
+		CurrentStrafeOffset += (TargetStrafeOffset - CurrentStrafeOffset)
+			* FClamp(StrafeCompensationSpeed * DeltaTime, 0.0, 1.0);
+		YOffset += CurrentStrafeOffset * Y;
+	}
+
+	// Step 1: clamp vertical camera arm - pull down below ceiling if needed.
+	A = Trace(RL,TraceHitNormal,Pp.Location+CamZ*Z,Pp.Location,false);
+	if ( A == None )
+		RL = Pp.Location+CamZ*Z;
+	else
+		RL = RL + TraceHitNormal * 6;
+
+	// Step 2: clamp horizontal camera arm - keep camera out of walls behind player.
+	B = Trace(TraceHitLocation,TraceHitNormal,RL-CamX*X,RL,false);
+	if ( B == None )
+		TraceHitLocation = RL-CamX*X;
+	else
+		TraceHitLocation = TraceHitLocation + TraceHitNormal * 6;
+
+	// Phase 4: resolve screen-centre aim from camera world position.
+	// This traces from the camera along its forward axis to preserve
+	// centre-screen alignment while keeping camera/pawn rotation decoupled.
 	ScreenCenterAimPoint = CamAimTrace(TraceHitLocation + YOffset, X);
+	SafeAimPoint = (TraceHitLocation + YOffset) + AimTraceDistance * X;
+
+	// Cull targets that would cause violent yaw lurches: too close to head,
+	// behind camera-forward, or excessively sideways from camera-forward.
+	HeadPos = Pp.Location + Pp.EyeHeight * vect(0,0,1);
+	AimDir = ScreenCenterAimPoint - HeadPos;
+	if ( VSize(AimDir) < AimCullMinDistance || (Normal(AimDir) Dot X) < AimCullMinForwardDot )
+		ScreenCenterAimPoint = SafeAimPoint;
 
 	// Phase 5: update Pp.ViewRotation from head → screen-centre direction so
 	// weapons fire at what the camera is pointing at.
 	if ( AimAssist != None )
 	{
 		AimAssist.UpdateRotationFromCamera(Pp, ScreenCenterAimPoint, DeltaTime);
+		LastTraceRot = rotator(ScreenCenterAimPoint - HeadPos);
 	}
 	else
 	{
-		HeadPos = Pp.Location + Pp.EyeHeight * vect(0,0,1);
 		Pp.ViewRotation = rotator(ScreenCenterAimPoint - HeadPos);
+		LastTraceRot = Pp.ViewRotation;
 		Pp.ViewRotation.Roll = 0;
 		if ( Role == ROLE_Authority )
 		{
@@ -205,9 +265,12 @@ simulated function tick(float Deltatime)
 	// frame's ConsumeInput delta reflects only actual player mouse movement.
 	if ( CamController != None )
 		CamController.RecordPostAssistRotation(Pp);
+	LastPlayerViewRot = Pp.ViewRotation;
+	LastCamViewRot = CamRot;
 
 	OwnerSee();
-	LaserSight();
+	if ( bLaserEnabled )
+		LaserSight();
 	if ( MyTimer <= 0.01 )
 		MyTimer += Deltatime;
 	if ( MyTimer >= 0.01 )
@@ -217,12 +280,18 @@ simulated function tick(float Deltatime)
 		{
 			SetRotation(CamRot);
 
-			SetLocation(LerpVector(Location,TraceHitLocation + YOffset,0.37));
+			// Lerp toward target, then clamp against geometry so the camera
+			// cannot glide through walls during the interpolation step.
+			RL = LerpVector(Location, TraceHitLocation + YOffset, 0.37);
+			if ( Trace(SafeAimPoint, TraceHitNormal, RL, Pp.Location, false) != None )
+				RL = SafeAimPoint + TraceHitNormal * 6;
+			SetLocation(RL);
 
 			if ( cHUD != None )
-				cHUD.Crosshair = 999;
+				cHUD.Crosshair = OriginalCrosshair;
 		}
-		Pp.Weapon.bOwnsCrossHair = True;
+		if ( Pp.Weapon != None )
+			Pp.Weapon.bOwnsCrossHair = False;
 	}
 	}
 }
@@ -234,21 +303,19 @@ simulated function EnsureCamController()
 		CamController = Spawn(class'EotsCameraController', Owner);
 }
 
-// Traces from the camera's target world position along its forward vector to
-// find the world-space point at the centre of the screen.  This is the stable
-// aim reference that replaces Pp.ViewRotation-derived shoulder traces.
+// Returns world-space point at screen centre using a camera-forward trace.
+// Self/owner hits are ignored and fall back to far forward point.
 simulated function vector CamAimTrace(vector CamPos, vector CamForward)
 {
 	local vector HitLoc, HitNorm;
-	local actor HitActor;
 	local vector EndPoint;
+	local actor HitActor;
 
 	EndPoint = CamPos + AimTraceDistance * CamForward;
 	HitActor = Trace(HitLoc, HitNorm, EndPoint, CamPos, True);
 	if ( HitActor == None )
 		return EndPoint;
 
-	// Ignore self/owner hits so the target does not orbit around the player body.
 	if ( HitActor == Self || HitActor == Owner )
 		return EndPoint;
 
@@ -260,7 +327,7 @@ simulated function LaserSight()
 	Local Vector X2,Y2,Z2,X,Y,Z,TraceHitLocation,TraceHitNormal,TraceStart,LL,PlayerLoc;
 	local actor A;
 	Local PlayerPawn Pp;
-	local float dist1,dist2,dist3,scale;
+	local float dist2,dist3,scale;
 	local int i;
 
 	Pp = PlayerPawn(Owner);
@@ -290,26 +357,11 @@ simulated function LaserSight()
 			TraceHitLocation = TraceStart + 100000 * X;
 	}
 
-	dist1 = vSize(TraceHitLocation-Location);
-	if ( Role < ROLE_Authority )
-	{
-		Cross = Spawn(class'EotsCross',Pp,,TraceHitLocation);
-		Cross.Drawscale = dist1/100*Pp.FovAngle/90;
-		Cross.Texture = Crosshair;
-		Cross.SpriteProjForward = 1;
-		
-	}
 	LL = TraceHitLocation;
 	dist2 = vSize(LL-Location);
-	if ( Role < ROLE_Authority )
-	{
-		Dot = Spawn(class'EotsDot',Pp,,LL);
-		Dot.Drawscale = dist2/2000*Pp.FovAngle/90;
-		Dot.SpriteProjForward = 1;
-	}
 	if ( vSize(LL-TraceStart) < 80 )
 		Return;
-	dist3 = dist2/80;
+	dist3 = dist2/10;
 	scale = 1/(dist3+1);
 	if ( Level.NetMode == NM_Standalone )
 	{
@@ -321,11 +373,11 @@ simulated function LaserSight()
 	}
 		
 	GetAxes(rotator(LL-PlayerLoc),X2,Y2,Z2);
-	if ( Role < ROLE_Authority )
+	if ( Role < ROLE_Authority || Level.NetMode == NM_Standalone )
 	{
 		for ( i = 0 ; i < dist3+1 ; i++ )
 		{
-			Laser[i] = Spawn(class'EotsLaser',Pp,,PlayerLoc + (i*40)*X2,rotator(LL-PlayerLoc));
+			Laser[i] = Spawn(class'EotsLaser',Pp,,PlayerLoc + (i*10)*X2,rotator(LL-PlayerLoc));
 			Laser[i].Scaleglow = 1 - (i*scale);
 			if ( AimAssist != None )
 			{
@@ -352,12 +404,43 @@ simulated function OwnerSee()
 	}
 }
 
+simulated function DrawDebugOverlay(canvas Canvas)
+{
+	local float BaseX, BaseY, LineH;
+
+	if ( !bDebugOverlayEnabled || Canvas == None )
+		return;
+
+	BaseX = 16.0;
+	BaseY = Canvas.ClipY * 0.62;
+	LineH = 26.0;
+
+	Canvas.Style = ERenderStyle.STY_Normal;
+	Canvas.DrawColor.R = 255;
+	Canvas.DrawColor.G = 32;
+	Canvas.DrawColor.B = 32;
+
+	Canvas.SetPos(BaseX, BaseY);
+	Canvas.DrawText("EOTS DEBUG:", False);
+	Canvas.SetPos(BaseX, BaseY + LineH);
+	Canvas.DrawText("PLY        CAM", False);
+	Canvas.SetPos(BaseX, BaseY + 2 * LineH);
+	Canvas.DrawText("PITCH   " $ string(LastPlayerViewRot.Pitch) $ ", " $ string(LastTraceRot.Pitch), False);
+	Canvas.SetPos(BaseX, BaseY + 3 * LineH);
+	Canvas.DrawText("YAW     " $ string(LastPlayerViewRot.Yaw) $ ", " $ string(LastTraceRot.Yaw), False);
+	Canvas.SetPos(BaseX, BaseY + 4 * LineH);
+	Canvas.DrawText("ROLL    " $ string(LastPlayerViewRot.Roll) $ ", " $ string(LastTraceRot.Roll), False);
+}
+
+simulated function PostRender(canvas Canvas)
+{
+	DrawDebugOverlay(Canvas);
+}
+
 simulated function Destroyed()
 {
 	if ( cHUD != None && Role < ROLE_Authority )
 		cHUD.Crosshair = OriginalCrosshair;
-	if ( Dot != None )
-		Dot.Destroy();
 	Super.Destroyed();
 }
 
@@ -371,6 +454,14 @@ defaultproperties
      CamX=90
      CamZ=32
      AimTraceDistance=100000.000000
+	AimCullMinForwardDot=0.300000
+	AimCullMinDistance=96.000000
+	OffsetLerpSpeed=8.000000
+	StrafeCompensationMax=25.000000
+	StrafeCompensationSpeed=5.000000
+	CamSmoothSpeed=15.000000
+	bDebugOverlayEnabled=True
+	bLaserEnabled=False
      RemoteRole=ROLE_SimulatedProxy 
      DrawType=DT_None
      Style=STY_None

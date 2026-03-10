@@ -13,6 +13,17 @@ var byte AimLaserBrightness;
 var float AimRotationBlendSpeed;
 var float AimMaxDistance;
 var float AimTracePadding;
+var bool bLaserEnabled;
+var bool bDebugOverlayEnabled;
+var int CamArmX;
+var int CamArmZ;
+var float CamTraceDistance;
+var float CamCullForwardDot;
+var float CamCullMinDist;
+var float CamOffsetLerpSpeed;
+var float CamStrafeCompMax;
+var float CamStrafeCompSpeed;
+var float CamSmoothSpeed;
 
 function ConfigureAimSettings(
 	bool bInEnabled,
@@ -22,7 +33,8 @@ function ConfigureAimSettings(
 	byte InLaserBrightness,
 	float InRotationBlendSpeed,
 	float InMaxDistance,
-	float InTracePadding
+	float InTracePadding,
+	bool bInLaserEnabled
 )
 {
 	bAimAssistEnabled = bInEnabled;
@@ -33,25 +45,72 @@ function ConfigureAimSettings(
 	AimRotationBlendSpeed = InRotationBlendSpeed;
 	AimMaxDistance = InMaxDistance;
 	AimTracePadding = InTracePadding;
+	bLaserEnabled = bInLaserEnabled;
 
 	ApplyMutatorSettings();
 }
 
 function ApplyMutatorSettings()
 {
-	if ( AimAssist == None )
-		return;
+	if ( AimAssist != None )
+	{
+		AimAssist.Configure(
+			bAimAssistEnabled,
+			AimShoulderOffset,
+			AimLaserHue,
+			AimLaserSaturation,
+			AimLaserBrightness,
+			AimRotationBlendSpeed,
+			AimMaxDistance,
+			AimTracePadding,
+			bLaserEnabled
+		);
+	}
 
-	AimAssist.Configure(
-		bAimAssistEnabled,
-		AimShoulderOffset,
-		AimLaserHue,
-		AimLaserSaturation,
-		AimLaserBrightness,
-		AimRotationBlendSpeed,
-		AimMaxDistance,
-		AimTracePadding
-	);
+	if ( Cam != None )
+	{
+		Cam.bDebugOverlayEnabled = bDebugOverlayEnabled;
+		Cam.bLaserEnabled = bLaserEnabled;
+		Cam.CamX = CamArmX;
+		Cam.CamZ = CamArmZ;
+		Cam.AimTraceDistance = CamTraceDistance;
+		Cam.AimCullMinForwardDot = CamCullForwardDot;
+		Cam.AimCullMinDistance = CamCullMinDist;
+		Cam.OffsetLerpSpeed = CamOffsetLerpSpeed;
+		Cam.StrafeCompensationMax = CamStrafeCompMax;
+		Cam.StrafeCompensationSpeed = CamStrafeCompSpeed;
+		Cam.CamSmoothSpeed = CamSmoothSpeed;
+	}
+}
+
+function ConfigureDebugOverlay(bool bInEnabled)
+{
+	bDebugOverlayEnabled = bInEnabled;
+	ApplyMutatorSettings();
+}
+
+function ConfigureCamSettings(
+	int InArmX,
+	int InArmZ,
+	float InTraceDist,
+	float InCullDot,
+	float InCullDist,
+	float InLerpSpeed,
+	float InStrafeCompMax,
+	float InStrafeCompSpeed,
+	float InSmoothSpeed
+)
+{
+	CamArmX = InArmX;
+	CamArmZ = InArmZ;
+	CamTraceDistance = InTraceDist;
+	CamCullForwardDot = InCullDot;
+	CamCullMinDist = InCullDist;
+	CamOffsetLerpSpeed = InLerpSpeed;
+	CamStrafeCompMax = InStrafeCompMax;
+	CamStrafeCompSpeed = InStrafeCompSpeed;
+	CamSmoothSpeed = InSmoothSpeed;
+	ApplyMutatorSettings();
 }
 
 function PickupFunction(Pawn Other)
@@ -119,4 +178,15 @@ defaultproperties
 	AimRotationBlendSpeed=7.500000
 	AimMaxDistance=12000.000000
 	AimTracePadding=4.000000
+	bLaserEnabled=False
+	bDebugOverlayEnabled=True
+	CamArmX=90
+	CamArmZ=32
+	CamTraceDistance=100000.000000
+	CamCullForwardDot=0.300000
+	CamCullMinDist=96.000000
+	CamOffsetLerpSpeed=8.000000
+	CamStrafeCompMax=25.000000
+	CamStrafeCompSpeed=5.000000
+	CamSmoothSpeed=15.000000
 }
